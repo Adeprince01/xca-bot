@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -10,51 +10,94 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Clock, Settings, Twitter, Database, Play, Pause, RefreshCw } from "lucide-react"
+import { 
+  fetchStatus, 
+  startMonitoring, 
+  stopMonitoring, 
+  fetchConfig, 
+  updateConfig,
+  fetchMatches,
+  checkNow,
+  exportMatches,
+  cleanupDatabase,
+  StatusResponse,
+  FullConfig,
+  Match
+} from "@/lib/api"
 
 export default function TwitterMonitor() {
   const [isRunning, setIsRunning] = useState(false)
   const [activeTab, setActiveTab] = useState("dashboard")
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [status, setStatus] = useState<StatusResponse | null>(null)
+  const [recentMatches, setRecentMatches] = useState<Match[]>([])
 
-  // Mock data for demonstration
-  const [recentMatches, setRecentMatches] = useState([
-    {
-      username: "@crypto_whale",
-      contractAddress: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
-      tweetLink: "https://twitter.com/crypto_whale/status/1234567890",
-      timestamp: "2025-03-12 14:35 UTC",
-      content: "Check out this new token pwease 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+  // Configuration state with nested structure
+  const [config, setConfig] = useState<FullConfig>({
+    twitter: {
+      api_key: "",
+      api_secret: "",
+      access_token: "",
+      access_token_secret: ""
     },
-    {
-      username: "@defi_guru",
-      contractAddress: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
-      tweetLink: "https://twitter.com/defi_guru/status/9876543210",
-      timestamp: "2025-03-12 14:22 UTC",
-      content: "Just launched! 0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+    telegram: {
+      bot_token: "",
+      channel_id: "",
+      enable_direct_messages: false,
+      include_tweet_text: true
     },
-  ])
-
-  const [config, setConfig] = useState({
-    twitterApiKey: "●●●●●●●●●●●●●●●●",
-    twitterApiSecret: "●●●●●●●●●●●●●●●●",
-    twitterAccessToken: "●●●●●●●●●●●●●●●●",
-    twitterTokenSecret: "●●●●●●●●●●●●●●●●",
-    telegramBotToken: "●●●●●●●●●●●●●●●●",
-    telegramChannel: "",
-    checkInterval: 15,
-    directMessages: false,
-    includeTweetText: true,
-    twitterUsernames: "@crypto_whale, @defi_guru, @nft_collector, @eth_dev",
-    regexPatterns: "0x[a-fA-F0-9]{40}\npwease\nlaunch",
-    keywords: "airdrop\nICO\nwhitelist",
+    monitoring: {
+      check_interval_minutes: 15,
+      usernames: [],
+      regex_patterns: [],
+      keywords: []
+    }
   })
 
-  const handleConfigChange = (field) => (e) => {
+  // Fetch initial data
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        
+        // Fetch status
+        const statusData = await fetchStatus()
+        setStatus(statusData)
+        setIsRunning(statusData.is_running)
+        
+        // Fetch configuration
+        const configData = await fetchConfig()
+        setConfig(configData)
+        
+        // Fetch recent matches
+        const matchesData = await fetchMatches(10)
+        setRecentMatches(matchesData.matches)
+      } catch (err) {
+        console.error("Error fetching data:", err)
+        setError("Failed to load data. Please check if the API server is running.")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+    
+    // Poll for updates every 30 seconds
+    const interval = setInterval(fetchData, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleConfigChange = (section: keyof FullConfig, field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     try {
-      const value = e.target.type === "checkbox" ? e.target.checked : e.target.value
+      const value = e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value
       setConfig({
         ...config,
-        [field]: value,
+        [section]: {
+          ...config[section],
+          [field]: value,
+        },
       })
     } catch (err) {
       console.error(`Error updating ${field}:`, err)
@@ -62,11 +105,17 @@ export default function TwitterMonitor() {
     }
   }
 
-  const toggleMonitoring = () => {
+  const toggleMonitoring = async () => {
     try {
-      setIsRunning(!isRunning)
-      // Clear any previous errors when toggling state
       setError(null)
+      
+      if (isRunning) {
+        await stopMonitoring()
+        setIsRunning(false)
+      } else {
+        await startMonitoring()
+        setIsRunning(true)
+      }
     } catch (err) {
       console.error("Error toggling monitoring status:", err)
       setError("Failed to toggle monitoring status. Please try again.")
@@ -75,15 +124,44 @@ export default function TwitterMonitor() {
 
   const saveConfiguration = async () => {
     try {
-      // In a real app, this would be an API call
-      // Simulate an async operation
       setError(null)
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      await updateConfig(config)
       alert("Configuration saved successfully!")
     } catch (err) {
       console.error("Error saving configuration:", err)
       setError("Failed to save configuration. Please try again.")
     }
+  }
+
+  const refreshData = async () => {
+    try {
+      setError(null)
+      
+      // Fetch recent matches
+      const matchesData = await fetchMatches(10)
+      setRecentMatches(matchesData.matches)
+      
+      // Fetch status
+      const statusData = await fetchStatus()
+      setStatus(statusData)
+      setIsRunning(statusData.is_running)
+      
+      alert("Data refreshed successfully!")
+    } catch (err) {
+      console.error("Error refreshing data:", err)
+      setError("Failed to refresh data. Please try again.")
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="container mx-auto p-4 flex justify-center items-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-lg">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -119,7 +197,7 @@ export default function TwitterMonitor() {
           <span className="block sm:inline">{error}</span>
           <button className="absolute top-0 bottom-0 right-0 px-4 py-3" onClick={() => setError(null)}>
             <span className="sr-only">Dismiss</span>
-            <span className="text-xl">&times;</span>
+            <span className="text-xl">×</span>
           </button>
         </div>
       )}
@@ -147,7 +225,7 @@ export default function TwitterMonitor() {
                 <CardTitle>Tracked Users</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">24</div>
+                <div className="text-2xl font-bold">{config.monitoring.usernames.length}</div>
                 <p className="text-muted-foreground">From configuration</p>
               </CardContent>
             </Card>
@@ -156,7 +234,7 @@ export default function TwitterMonitor() {
                 <CardTitle>Matches Today</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">17</div>
+                <div className="text-2xl font-bold">{recentMatches.length}</div>
                 <p className="text-muted-foreground">Since midnight UTC</p>
               </CardContent>
             </Card>
@@ -181,13 +259,13 @@ export default function TwitterMonitor() {
                         {match.timestamp}
                       </div>
                     </div>
-                    <p className="mb-2">{match.content}</p>
+                    <p className="mb-2">{match.tweet_text}</p>
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="outline" className="text-xs">
-                        {match.contractAddress}
+                        {match.matched_pattern.join(", ")}
                       </Badge>
                       <a
-                        href={match.tweetLink}
+                        href={match.tweet_url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-blue-500 hover:underline"
@@ -200,20 +278,7 @@ export default function TwitterMonitor() {
               </div>
             </CardContent>
             <CardFooter>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => {
-                  try {
-                    // In a real app, this would refresh data from the API
-                    setError(null)
-                    alert("Data refreshed successfully!")
-                  } catch (err) {
-                    console.error("Error refreshing data:", err)
-                    setError("Failed to refresh data. Please try again.")
-                  }
-                }}
-              >
+              <Button variant="outline" className="w-full" onClick={refreshData}>
                 <RefreshCw className="mr-2 h-4 w-4" /> Refresh Data
               </Button>
             </CardFooter>
@@ -233,8 +298,8 @@ export default function TwitterMonitor() {
                   <Input
                     id="twitter-api-key"
                     type="password"
-                    value={config.twitterApiKey}
-                    onChange={handleConfigChange("twitterApiKey")}
+                    value={config.twitter.api_key}
+                    onChange={handleConfigChange("twitter", "api_key")}
                   />
                 </div>
                 <div className="space-y-2">
@@ -242,8 +307,8 @@ export default function TwitterMonitor() {
                   <Input
                     id="twitter-api-secret"
                     type="password"
-                    value={config.twitterApiSecret}
-                    onChange={handleConfigChange("twitterApiSecret")}
+                    value={config.twitter.api_secret}
+                    onChange={handleConfigChange("twitter", "api_secret")}
                   />
                 </div>
                 <div className="space-y-2">
@@ -251,8 +316,8 @@ export default function TwitterMonitor() {
                   <Input
                     id="twitter-access-token"
                     type="password"
-                    value={config.twitterAccessToken}
-                    onChange={handleConfigChange("twitterAccessToken")}
+                    value={config.twitter.access_token}
+                    onChange={handleConfigChange("twitter", "access_token")}
                   />
                 </div>
                 <div className="space-y-2">
@@ -260,8 +325,8 @@ export default function TwitterMonitor() {
                   <Input
                     id="twitter-token-secret"
                     type="password"
-                    value={config.twitterTokenSecret}
-                    onChange={handleConfigChange("twitterTokenSecret")}
+                    value={config.twitter.access_token_secret}
+                    onChange={handleConfigChange("twitter", "access_token_secret")}
                   />
                 </div>
                 <div className="space-y-2">
@@ -269,8 +334,8 @@ export default function TwitterMonitor() {
                   <Input
                     id="check-interval"
                     type="number"
-                    value={config.checkInterval}
-                    onChange={handleConfigChange("checkInterval")}
+                    value={config.monitoring.check_interval_minutes}
+                    onChange={handleConfigChange("monitoring", "check_interval_minutes")}
                   />
                 </div>
               </CardContent>
@@ -287,8 +352,8 @@ export default function TwitterMonitor() {
                   <Input
                     id="telegram-bot-token"
                     type="password"
-                    value={config.telegramBotToken}
-                    onChange={handleConfigChange("telegramBotToken")}
+                    value={config.telegram.bot_token}
+                    onChange={handleConfigChange("telegram", "bot_token")}
                   />
                 </div>
                 <div className="space-y-2">
@@ -296,23 +361,29 @@ export default function TwitterMonitor() {
                   <Input
                     id="telegram-channel"
                     placeholder="@yourchannel or -100123456789"
-                    value={config.telegramChannel}
-                    onChange={handleConfigChange("telegramChannel")}
+                    value={config.telegram.channel_id}
+                    onChange={handleConfigChange("telegram", "channel_id")}
                   />
                 </div>
                 <div className="flex items-center space-x-2 pt-4">
                   <Switch
                     id="direct-messages"
-                    checked={config.directMessages}
-                    onCheckedChange={(checked) => setConfig({ ...config, directMessages: checked })}
+                    checked={config.telegram.enable_direct_messages}
+                    onCheckedChange={(checked) => setConfig({ 
+                      ...config, 
+                      telegram: { ...config.telegram, enable_direct_messages: checked }
+                    })}
                   />
                   <Label htmlFor="direct-messages">Enable direct messages to bot</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Switch
                     id="include-tweet-text"
-                    checked={config.includeTweetText}
-                    onCheckedChange={(checked) => setConfig({ ...config, includeTweetText: checked })}
+                    checked={config.telegram.include_tweet_text}
+                    onCheckedChange={(checked) => setConfig({ 
+                      ...config, 
+                      telegram: { ...config.telegram, include_tweet_text: checked }
+                    })}
                   />
                   <Label htmlFor="include-tweet-text">Include tweet text in notifications</Label>
                 </div>
@@ -331,8 +402,14 @@ export default function TwitterMonitor() {
                 <Textarea
                   id="twitter-usernames"
                   placeholder="@user1, @user2, @user3"
-                  value={config.twitterUsernames}
-                  onChange={handleConfigChange("twitterUsernames")}
+                  value={config.monitoring.usernames.join(", ")}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    monitoring: {
+                      ...config.monitoring,
+                      usernames: e.target.value.split(", ").map(u => u.trim())
+                    }
+                  })}
                   className="min-h-[100px]"
                 />
                 <p className="text-sm text-muted-foreground">Comma-separated list of Twitter/X usernames to monitor</p>
@@ -343,8 +420,14 @@ export default function TwitterMonitor() {
                 <Textarea
                   id="regex-patterns"
                   placeholder="Enter regex patterns, one per line"
-                  value={config.regexPatterns}
-                  onChange={handleConfigChange("regexPatterns")}
+                  value={config.monitoring.regex_patterns.join("\n")}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    monitoring: {
+                      ...config.monitoring,
+                      regex_patterns: e.target.value.split("\n").map(p => p.trim())
+                    }
+                  })}
                   className="min-h-[100px] font-mono text-sm"
                 />
                 <p className="text-sm text-muted-foreground">
@@ -357,8 +440,14 @@ export default function TwitterMonitor() {
                 <Textarea
                   id="keywords"
                   placeholder="Enter keywords, one per line"
-                  value={config.keywords}
-                  onChange={handleConfigChange("keywords")}
+                  value={config.monitoring.keywords.join("\n")}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    monitoring: {
+                      ...config.monitoring,
+                      keywords: e.target.value.split("\n").map(k => k.trim())
+                    }
+                  })}
                   className="min-h-[100px]"
                 />
                 <p className="text-sm text-muted-foreground">One keyword per line. Case insensitive.</p>
@@ -447,9 +536,10 @@ export default function TwitterMonitor() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
+                  onClick={async () => {
                     try {
                       setError(null)
+                      await exportMatches()
                       alert("Data exported successfully!")
                     } catch (err) {
                       console.error("Error exporting data:", err)
@@ -462,9 +552,10 @@ export default function TwitterMonitor() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
+                  onClick={async () => {
                     try {
                       setError(null)
+                      await cleanupDatabase()
                       alert("Database compacted successfully!")
                     } catch (err) {
                       console.error("Error compacting database:", err)
@@ -482,4 +573,3 @@ export default function TwitterMonitor() {
     </div>
   )
 }
-

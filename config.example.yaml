@@ -1,0 +1,55 @@
+# XCA-Bot Configuration Example
+# Replace placeholder values with your actual configuration
+
+# Twitter API Configuration
+twitter:
+  api_key: "your_twitter_api_key"
+  api_secret: "your_twitter_api_secret"
+  access_token: "your_twitter_access_token"
+  access_token_secret: "your_twitter_access_token_secret"
+  bearer_token: "your_twitter_bearer_token"
+  timeout_seconds: 30  # Connection timeout
+
+# Telegram Bot Configuration
+telegram:
+  bot_token: "your_telegram_bot_token"
+  primary_channel: "-1001234567890"  # Channel/Group ID for primary notifications
+  forwarding_destinations:  # Additional channels/groups to forward notifications to
+    - chat_id: "-1009876543210"
+      description: "Alerts Channel"
+    - chat_id: "123456789"
+      description: "Admin User"
+  timeout_seconds: 30  # Connection timeout
+
+# Database Configuration
+database:
+  connection_string: "sqlite:///xca_bot.db"  # SQLite database path
+  # For PostgreSQL, use format: "postgresql://user:password@localhost:5432/xca_bot"
+
+# Monitoring Configuration
+monitoring:
+  usernames:  # Twitter usernames to monitor
+    - "username1"
+    - "username2"
+    - "username3"
+  check_interval_minutes: 5  # How often to check for new tweets
+  lookback_hours: 24  # How far back to check for tweets on startup
+  max_tweets_per_check: 20  # Maximum number of tweets to retrieve per check
+  
+  # Regular expression patterns to match cryptocurrency contract addresses
+  regex_patterns:
+    - "0x[a-fA-F0-9]{40}"  # Ethereum/BSC
+    - "[1-9A-HJ-NP-Za-km-z]{26,35}"  # Bitcoin-like
+  
+  # Keywords to look for in tweets (optional)
+  keywords:
+    - "contract"
+    - "address"
+    - "token"
+
+# Application Configuration
+application:
+  debug_mode: false  # Enable additional debug logging
+  timezone: "UTC"  # Timezone for timestamp display
+  log_level: "INFO"  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  log_file: "logs/xca_bot.log"  # Path to log file 

@@ -61,11 +61,15 @@ npm install
 
 ### Starting the System
 
+<<<<<<< HEAD
 1. Start the backend API:
 ```bash
 cd twitter-monitor-backend
 python api.py
 ```
+=======
+The easiest way to deploy the Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+>>>>>>> 56b1aed54584d7a2dff998e28bceff21050365fc
 
 2. Start the frontend:
 ```bash

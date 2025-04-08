@@ -39,3 +39,29 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+venv/ or .venv/ - Virtual environment directories
+.pytest_cache/ - Pytest cache directory
+*.pyc - Python compiled files (though we already have *.py[cod])
+dist/ and build/ - Distribution/build directories
+*.egg-info/ - Python egg metadata
+Node.js/Next.js specific:
+node_modules/ - NPM dependencies
+.next/ - Next.js build output
+out/ - Static export directory
+.env*.local - Local environment files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+Coverage reports:
+coverage/
+.coverage
+htmlcov/
+
+Additional temp/cache files:
+*.swp - Vim swap files
+*.swo - Vim swap files
+*.bak - Backup files
+*~ - Temp files
+.tmp/

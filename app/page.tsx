@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -9,7 +9,9 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Clock, Settings, Twitter, Database, Play, Pause, RefreshCw } from "lucide-react"
+import { Clock, Settings, Twitter, Database, Play, Pause, RefreshCw, Loader2 } from "lucide-react"
+import { TagInput } from "./components/TagInput"
+import "./styles/tag-input.css"
 import { 
   fetchStatus, 
   startMonitoring, 
@@ -20,10 +22,13 @@ import {
   checkNow,
   exportMatches,
   cleanupDatabase,
+  fetchLogs,
+  checkApiAvailability,
   StatusResponse,
   FullConfig,
   Match
 } from "@/lib/api"
+import { formatDateTime } from "@/lib/utils"
 
 export default function TwitterMonitor() {
   const [isRunning, setIsRunning] = useState(false)
@@ -32,6 +37,8 @@ export default function TwitterMonitor() {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [recentMatches, setRecentMatches] = useState<Match[]>([])
+  const [logs, setLogs] = useState<string[]>([])
+  const logsEndRef = useRef<HTMLDivElement>(null)
 
   // Configuration state with nested structure
   const [config, setConfig] = useState<FullConfig>({
@@ -55,17 +62,34 @@ export default function TwitterMonitor() {
     }
   })
 
-  // Fetch initial data
+  // Add loading states
+  const [isSavingConfig, setIsSavingConfig] = useState(false)
+  const [isCheckingNow, setIsCheckingNow] = useState(false)
+  const [isTogglingMonitor, setIsTogglingMonitor] = useState(false)
+  const [isExportingMatches, setIsExportingMatches] = useState(false)
+  const [isCleaningDatabase, setIsCleaningDatabase] = useState(false)
+
+  // Scroll to bottom of logs when new entries arrive
+  const scrollToBottom = () => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
   useEffect(() => {
-    const fetchData = async () => {
+    scrollToBottom()
+  }, [logs])
+
+  // Fetch initial data and set up SSE connections
+  useEffect(() => {
+    const fetchInitialData = async () => {
       try {
         setLoading(true)
         setError(null)
         
-        // Fetch status
-        const statusData = await fetchStatus()
-        setStatus(statusData)
-        setIsRunning(statusData.is_running)
+        // Check if API is available first
+        const isAvailable = await checkApiAvailability()
+        if (!isAvailable) {
+          throw new Error("API server is not available. Please ensure the backend server is running.")
+        }
         
         // Fetch configuration
         const configData = await fetchConfig()
@@ -74,19 +98,91 @@ export default function TwitterMonitor() {
         // Fetch recent matches
         const matchesData = await fetchMatches(10)
         setRecentMatches(matchesData.matches)
+        
+        // Fetch initial logs
+        const logsData = await fetchLogs(100)
+        setLogs(logsData)
       } catch (err) {
-        console.error("Error fetching data:", err)
-        setError("Failed to load data. Please check if the API server is running.")
+        console.error("Error fetching initial data:", err)
+        setError(`Failed to load initial data: ${err instanceof Error ? err.message : String(err)}`)
       } finally {
         setLoading(false)
       }
     }
 
-    fetchData()
-    
-    // Poll for updates every 30 seconds
-    const interval = setInterval(fetchData, 30000)
-    return () => clearInterval(interval)
+    // Set up SSE connections
+    const setupSSE = () => {
+      // Status updates
+      const statusSource = new EventSource(`${process.env.NEXT_PUBLIC_API_URL}/stream/status`)
+      statusSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          setIsRunning(data.is_running)
+          setStatus(prev => ({
+            ...prev!,
+            is_running: data.is_running,
+            uptime: data.uptime,
+            last_check: data.next_run
+          }))
+        } catch (err) {
+          console.error("Error parsing status update:", err)
+        }
+      }
+      
+      // Match updates
+      const matchSource = new EventSource(`${process.env.NEXT_PUBLIC_API_URL}/stream/matches`)
+      matchSource.onmessage = (event) => {
+        try {
+          const match = JSON.parse(event.data)
+          setRecentMatches(prev => [match, ...prev].slice(0, 10))
+        } catch (err) {
+          console.error("Error parsing match update:", err)
+        }
+      }
+      
+      // Log updates
+      const logSource = new EventSource(`${process.env.NEXT_PUBLIC_API_URL}/stream/logs`)
+      logSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          setLogs(prev => [...prev, data.log])
+        } catch (err) {
+          console.error("Error parsing log update:", err)
+        }
+      }
+
+      // Error handling for SSE connections
+      const handleError = (source: EventSource, name: string) => {
+        source.onerror = (err) => {
+          console.error(`Error in ${name} SSE connection:`, err)
+          setError(`Lost connection to server (${name}). Attempting to reconnect...`)
+          
+          // Try to reconnect after a delay
+          setTimeout(() => {
+            source.close()
+            setupSSE()
+          }, 5000)
+        }
+      }
+
+      handleError(statusSource, "status")
+      handleError(matchSource, "matches")
+      handleError(logSource, "logs")
+
+      // Cleanup function
+      return () => {
+        statusSource.close()
+        matchSource.close()
+        logSource.close()
+      }
+    }
+
+    fetchInitialData()
+    const cleanup = setupSSE()
+
+    return () => {
+      cleanup()
+    }
   }, [])
 
   const handleConfigChange = (section: keyof FullConfig, field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -108,6 +204,7 @@ export default function TwitterMonitor() {
   const toggleMonitoring = async () => {
     try {
       setError(null)
+      setIsTogglingMonitor(true)
       
       if (isRunning) {
         await stopMonitoring()
@@ -118,21 +215,49 @@ export default function TwitterMonitor() {
       }
     } catch (err) {
       console.error("Error toggling monitoring status:", err)
-      setError("Failed to toggle monitoring status. Please try again.")
+      setError(`Failed to ${isRunning ? 'stop' : 'start'} monitoring: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setIsTogglingMonitor(false)
     }
   }
 
   const saveConfiguration = async () => {
     try {
       setError(null)
+      setIsSavingConfig(true)
       await updateConfig(config)
       alert("Configuration saved successfully!")
     } catch (err) {
       console.error("Error saving configuration:", err)
       setError("Failed to save configuration. Please try again.")
+    } finally {
+      setIsSavingConfig(false)
     }
   }
 
+  // Add function to calculate today's matches
+  const getMatchesToday = () => {
+    const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD
+    return recentMatches.filter(match => {
+      const matchDate = new Date(match.timestamp).toISOString().split('T')[0]
+      return matchDate === today
+    }).length
+  }
+
+  // Add function to run an immediate check
+  const performImmediateCheck = async () => {
+    try {
+      setError(null)
+      setIsCheckingNow(true)
+      await checkNow()
+    } catch (err) {
+      console.error("Error performing immediate check:", err)
+      setError(`Failed to perform check: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setIsCheckingNow(false)
+    }
+  }
+  
   const refreshData = async () => {
     try {
       setError(null)
@@ -150,6 +275,28 @@ export default function TwitterMonitor() {
     } catch (err) {
       console.error("Error refreshing data:", err)
       setError("Failed to refresh data. Please try again.")
+    }
+  }
+
+  // Update log management functions
+  const clearLogs = async () => {
+    try {
+      setError(null)
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/logs/clear`, { method: 'POST' })
+      setLogs([])
+    } catch (err) {
+      console.error("Error clearing logs:", err)
+      setError("Failed to clear logs. Please try again.")
+    }
+  }
+
+  const downloadLogs = async () => {
+    try {
+      setError(null)
+      window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/logs/download`
+    } catch (err) {
+      console.error("Error downloading logs:", err)
+      setError("Failed to download logs. Please try again.")
     }
   }
 
@@ -177,8 +324,16 @@ export default function TwitterMonitor() {
               {isRunning ? "Running" : "Stopped"}
             </Badge>
           </div>
-          <Button onClick={toggleMonitoring} variant={isRunning ? "destructive" : "default"}>
-            {isRunning ? (
+          <Button 
+            onClick={toggleMonitoring} 
+            variant={isRunning ? "destructive" : "default"}
+            disabled={isTogglingMonitor}
+          >
+            {isTogglingMonitor ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...
+              </>
+            ) : isRunning ? (
               <>
                 <Pause className="mr-2 h-4 w-4" /> Stop
               </>
@@ -216,8 +371,39 @@ export default function TwitterMonitor() {
                 <CardTitle>Monitoring Status</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{isRunning ? "Active" : "Inactive"}</div>
-                <p className="text-muted-foreground">Last check: 2 minutes ago</p>
+                <div className="flex justify-between items-center mb-2">
+                  <div className="text-2xl font-bold">{isRunning ? "Active" : "Inactive"}</div>
+                  <Badge variant={isRunning ? "default" : "outline"} className={isRunning ? "bg-green-500" : ""}>
+                    {isRunning ? "Running" : "Stopped"}
+                  </Badge>
+                </div>
+                {status?.last_check ? (
+                  <p className="text-muted-foreground">
+                    <Clock className="inline mr-1 h-4 w-4" /> Last check: {formatDateTime(status.last_check)}
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">No checks performed yet</p>
+                )}
+                {status?.uptime && (
+                  <p className="text-muted-foreground mt-1">Uptime: {status.uptime}</p>
+                )}
+                <Button 
+                  className="w-full mt-4" 
+                  onClick={performImmediateCheck}
+                  disabled={isCheckingNow || !isRunning}
+                  variant="outline"
+                  size="sm"
+                >
+                  {isCheckingNow ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Running Check
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4" /> Run Check Now
+                    </>
+                  )}
+                </Button>
               </CardContent>
             </Card>
             <Card>
@@ -226,7 +412,19 @@ export default function TwitterMonitor() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{config.monitoring.usernames.length}</div>
-                <p className="text-muted-foreground">From configuration</p>
+                <p className="text-muted-foreground">Checking every {config.monitoring.check_interval_minutes} minutes</p>
+                {config.monitoring.usernames.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {config.monitoring.usernames.slice(0, 5).map((username, i) => (
+                      <Badge key={i} variant="outline">@{username}</Badge>
+                    ))}
+                    {config.monitoring.usernames.length > 5 && (
+                      <Badge variant="outline">+{config.monitoring.usernames.length - 5} more</Badge>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-yellow-500">No users configured</div>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -234,8 +432,56 @@ export default function TwitterMonitor() {
                 <CardTitle>Matches Today</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{recentMatches.length}</div>
-                <p className="text-muted-foreground">Since midnight UTC</p>
+                <div className="text-2xl font-bold">{getMatchesToday()}</div>
+                <p className="text-muted-foreground">Since midnight {Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
+                <div className="flex justify-between mt-4">
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => {
+                      setIsExportingMatches(true);
+                      exportMatches()
+                        .then(() => alert("Data exported successfully!"))
+                        .catch((err) => {
+                          console.error("Error exporting data:", err)
+                          setError("Failed to export data. Please try again.")
+                        })
+                        .finally(() => setIsExportingMatches(false));
+                    }}
+                    disabled={isExportingMatches || recentMatches.length === 0}
+                  >
+                    {isExportingMatches ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Database className="h-4 w-4" />
+                    )} Export
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => {
+                      setIsCleaningDatabase(true);
+                      cleanupDatabase()
+                        .then(() => alert("Database compacted successfully!"))
+                        .catch((err) => {
+                          console.error("Error compacting database:", err)
+                          setError("Failed to compact database. Please try again.")
+                        })
+                        .finally(() => setIsCleaningDatabase(false));
+                    }}
+                    disabled={isCleaningDatabase}
+                  >
+                    {isCleaningDatabase ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Compacting...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" /> Compact DB
+                      </>
+                    )}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -397,65 +643,68 @@ export default function TwitterMonitor() {
               <CardDescription>Users to track and patterns to match</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="twitter-usernames">Twitter/X Usernames to Monitor</Label>
-                <Textarea
-                  id="twitter-usernames"
-                  placeholder="@user1, @user2, @user3"
-                  value={config.monitoring.usernames.join(", ")}
-                  onChange={(e) => setConfig({
-                    ...config,
-                    monitoring: {
-                      ...config.monitoring,
-                      usernames: e.target.value.split(", ").map(u => u.trim())
-                    }
-                  })}
-                  className="min-h-[100px]"
-                />
-                <p className="text-sm text-muted-foreground">Comma-separated list of Twitter/X usernames to monitor</p>
-              </div>
+              <TagInput
+                label="Twitter/X Usernames to Monitor"
+                description="List of Twitter/X usernames to monitor (without @ symbol)"
+                value={config.monitoring.usernames}
+                onChange={(values: string[]) => setConfig({
+                  ...config,
+                  monitoring: {
+                    ...config.monitoring,
+                    usernames: values
+                  }
+                })}
+                placeholder="Add username..."
+                className="mb-4"
+              />
 
-              <div className="space-y-2">
-                <Label htmlFor="regex-patterns">Regex Patterns</Label>
-                <Textarea
-                  id="regex-patterns"
-                  placeholder="Enter regex patterns, one per line"
-                  value={config.monitoring.regex_patterns.join("\n")}
-                  onChange={(e) => setConfig({
-                    ...config,
-                    monitoring: {
-                      ...config.monitoring,
-                      regex_patterns: e.target.value.split("\n").map(p => p.trim())
-                    }
-                  })}
-                  className="min-h-[100px] font-mono text-sm"
-                />
-                <p className="text-sm text-muted-foreground">
-                  One pattern per line. Example: 0x[a-fA-F0-9]{40} for Ethereum addresses
-                </p>
-              </div>
+              <TagInput
+                label="Regex Patterns"
+                description="Regular expressions to match in tweets"
+                value={config.monitoring.regex_patterns}
+                onChange={(values: string[]) => setConfig({
+                  ...config,
+                  monitoring: {
+                    ...config.monitoring,
+                    regex_patterns: values
+                  }
+                })}
+                placeholder="Add regex pattern..."
+                className="mb-4"
+              />
 
-              <div className="space-y-2">
-                <Label htmlFor="keywords">Keywords to Match</Label>
-                <Textarea
-                  id="keywords"
-                  placeholder="Enter keywords, one per line"
-                  value={config.monitoring.keywords.join("\n")}
-                  onChange={(e) => setConfig({
-                    ...config,
-                    monitoring: {
-                      ...config.monitoring,
-                      keywords: e.target.value.split("\n").map(k => k.trim())
-                    }
-                  })}
-                  className="min-h-[100px]"
-                />
-                <p className="text-sm text-muted-foreground">One keyword per line. Case insensitive.</p>
-              </div>
+              <TagInput
+                label="Keywords to Match"
+                description="Simple keywords to look for in tweets"
+                value={config.monitoring.keywords}
+                onChange={(values: string[]) => setConfig({
+                  ...config,
+                  monitoring: {
+                    ...config.monitoring,
+                    keywords: values
+                  }
+                })}
+                placeholder="Add keyword..."
+                className="mb-4"
+              />
             </CardContent>
             <CardFooter>
-              <Button className="w-full" onClick={saveConfiguration}>
-                <Settings className="mr-2 h-4 w-4" /> Save Configuration
+              <Button 
+                className="w-full" 
+                onClick={saveConfiguration}
+                disabled={isSavingConfig}
+              >
+                {isSavingConfig ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving Configuration...
+                  </>
+                ) : (
+                  <>
+                    <Settings className="mr-2 h-4 w-4" /> 
+                    Save Configuration
+                  </>
+                )}
               </Button>
             </CardFooter>
           </Card>
@@ -469,52 +718,27 @@ export default function TwitterMonitor() {
             </CardHeader>
             <CardContent>
               <div className="bg-muted p-4 rounded-md font-mono text-sm h-[400px] overflow-y-auto">
-                <div className="text-green-500">[2025-03-12 19:01:23] INFO: Monitoring started</div>
-                <div className="text-blue-500">[2025-03-12 19:01:24] INFO: Checking 24 users for updates</div>
-                <div className="text-blue-500">[2025-03-12 19:01:35] INFO: Found match in @crypto_whale tweet</div>
-                <div className="text-blue-500">[2025-03-12 19:01:36] INFO: Sent notification to Telegram</div>
-                <div className="text-blue-500">[2025-03-12 19:01:40] INFO: Found match in @defi_guru tweet</div>
-                <div className="text-blue-500">[2025-03-12 19:01:41] INFO: Sent notification to Telegram</div>
-                <div className="text-yellow-500">
-                  [2025-03-12 19:01:45] WARNING: Rate limit approaching (450/500 requests)
-                </div>
-                <div className="text-blue-500">[2025-03-12 19:16:23] INFO: Checking 24 users for updates</div>
-                <div className="text-blue-500">[2025-03-12 19:16:45] INFO: No new matches found</div>
-                <div className="text-blue-500">[2025-03-12 19:31:23] INFO: Checking 24 users for updates</div>
-                <div className="text-red-500">[2025-03-12 19:31:25] ERROR: Twitter API rate limit exceeded</div>
-                <div className="text-blue-500">[2025-03-12 19:31:26] INFO: Waiting 15 minutes before retry</div>
-                <div className="text-blue-500">[2025-03-12 19:46:23] INFO: Checking 24 users for updates</div>
-                <div className="text-blue-500">[2025-03-12 19:46:35] INFO: Found match in @nft_collector tweet</div>
-                <div className="text-blue-500">[2025-03-12 19:46:36] INFO: Sent notification to Telegram</div>
+                {logs.map((log, index) => (
+                  <div
+                    key={index}
+                    className={
+                      log.includes("ERROR") ? "text-red-500" :
+                      log.includes("WARNING") ? "text-yellow-500" :
+                      log.includes("INFO") ? "text-blue-500" :
+                      "text-green-500"
+                    }
+                  >
+                    {log}
+                  </div>
+                ))}
+                <div ref={logsEndRef} />
               </div>
             </CardContent>
             <CardFooter className="flex justify-between">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  try {
-                    setError(null)
-                    alert("Logs cleared successfully!")
-                  } catch (err) {
-                    console.error("Error clearing logs:", err)
-                    setError("Failed to clear logs. Please try again.")
-                  }
-                }}
-              >
+              <Button variant="outline" onClick={clearLogs}>
                 Clear Logs
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  try {
-                    setError(null)
-                    alert("Logs downloaded successfully!")
-                  } catch (err) {
-                    console.error("Error downloading logs:", err)
-                    setError("Failed to download logs. Please try again.")
-                  }
-                }}
-              >
+              <Button variant="outline" onClick={downloadLogs}>
                 Download Logs
               </Button>
             </CardFooter>
@@ -539,15 +763,27 @@ export default function TwitterMonitor() {
                   onClick={async () => {
                     try {
                       setError(null)
+                      setIsExportingMatches(true)
                       await exportMatches()
                       alert("Data exported successfully!")
                     } catch (err) {
                       console.error("Error exporting data:", err)
                       setError("Failed to export data. Please try again.")
+                    } finally {
+                      setIsExportingMatches(false)
                     }
                   }}
+                  disabled={isExportingMatches}
                 >
-                  <Database className="mr-2 h-4 w-4" /> Export CSV
+                  {isExportingMatches ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Exporting...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="mr-2 h-4 w-4" /> Export CSV
+                    </>
+                  )}
                 </Button>
                 <Button
                   variant="outline"
@@ -555,15 +791,27 @@ export default function TwitterMonitor() {
                   onClick={async () => {
                     try {
                       setError(null)
+                      setIsCleaningDatabase(true)
                       await cleanupDatabase()
                       alert("Database compacted successfully!")
                     } catch (err) {
                       console.error("Error compacting database:", err)
                       setError("Failed to compact database. Please try again.")
+                    } finally {
+                      setIsCleaningDatabase(false)
                     }
                   }}
+                  disabled={isCleaningDatabase}
                 >
-                  <RefreshCw className="mr-2 h-4 w-4" /> Compact DB
+                  {isCleaningDatabase ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Compacting...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4" /> Compact DB
+                    </>
+                  )}
                 </Button>
               </div>
             </CardContent>

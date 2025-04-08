@@ -9,6 +9,10 @@ import requests
 from datetime import datetime
 import tweepy
 from telegram import Bot
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 # Configure logging
 logging.basicConfig(
@@ -26,6 +30,7 @@ class TwitterMonitor:
     def __init__(self, config_file="config.json"):
         """Initialize the Twitter Monitor with configuration."""
         self.config = self.load_config(config_file)
+        self.apply_env_overrides()  # Apply environment variables over config values
         self.setup_twitter_api()
         self.setup_telegram_bot()
         self.setup_database()
@@ -51,20 +56,61 @@ class TwitterMonitor:
                 "telegram": {
                     "bot_token": "",
                     "channel_id": "",
+                    "forwarding_destinations": [],
                     "enable_direct_messages": True,
                     "include_tweet_text": True
                 },
                 "monitoring": {
                     "check_interval_minutes": 15,
                     "usernames": [],
-                    "regex_patterns": ["0x[a-fA-F0-9]{40}"],
-                    "keywords": ["pwease", "launch"]
+                    "regex_patterns": ["0x[a-fA-F0-9]{40}"],  # Ethereum address pattern
+                    "keywords": ["contract", "address", "CA", "token", "launch", "airdrop", "presale", "blockchain"]
                 }
             }
             with open(config_file, 'w') as f:
                 json.dump(default_config, f, indent=4)
             logger.info(f"Created default configuration file: {config_file}")
             return default_config
+    
+    def apply_env_overrides(self):
+        """Apply environment variables to override configuration."""
+        # Twitter API credentials
+        twitter_api_key = os.getenv("TWITTER_API_KEY")
+        if twitter_api_key:
+            self.config["twitter"]["api_key"] = twitter_api_key
+            
+        twitter_api_secret = os.getenv("TWITTER_API_SECRET")
+        if twitter_api_secret:
+            self.config["twitter"]["api_secret"] = twitter_api_secret
+            
+        twitter_access_token = os.getenv("TWITTER_ACCESS_TOKEN")
+        if twitter_access_token:
+            self.config["twitter"]["access_token"] = twitter_access_token
+            
+        twitter_access_token_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
+        if twitter_access_token_secret:
+            self.config["twitter"]["access_token_secret"] = twitter_access_token_secret
+        
+        # Telegram configuration
+        telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if telegram_bot_token:
+            self.config["telegram"]["bot_token"] = telegram_bot_token
+            
+        telegram_channel_id = os.getenv("TELEGRAM_CHANNEL_ID")
+        if telegram_channel_id:
+            self.config["telegram"]["channel_id"] = telegram_channel_id
+        
+        # Check interval
+        check_interval = os.getenv("MONITORING_CHECK_INTERVAL_MINUTES")
+        if check_interval and check_interval.isdigit():
+            self.config["monitoring"]["check_interval_minutes"] = int(check_interval)
+        
+        # Ensure forwarding_destinations exists
+        if "forwarding_destinations" not in self.config["telegram"]:
+            self.config["telegram"]["forwarding_destinations"] = []
+        
+        # Log the override status
+        logger.info("Applied environment variable overrides to configuration")
     
     def save_config(self, config_file="config.json"):
         """Save current configuration to JSON file."""
@@ -97,9 +143,15 @@ class TwitterMonitor:
     def setup_telegram_bot(self):
         """Set up Telegram bot."""
         try:
-            self.telegram_bot = Bot(token=self.config["telegram"]["bot_token"])
-            bot_info = self.telegram_bot.get_me()
-            logger.info(f"Telegram bot connected: @{bot_info.username}")
+            token = self.config["telegram"]["bot_token"]
+            if not token:
+                logger.error("Telegram bot token is missing")
+                self.telegram_bot = None
+                return
+                
+            self.telegram_bot = Bot(token=token)
+            # Don't try to get bot info, which requires await
+            logger.info(f"Telegram bot initialized with token: {token[:5]}...{token[-5:] if len(token) > 10 else ''}")
         except Exception as e:
             logger.error(f"Error setting up Telegram bot: {e}")
             self.telegram_bot = None
@@ -241,11 +293,22 @@ class TwitterMonitor:
             tweet_url = f"https://twitter.com/{username}/status/{tweet_id}"
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
             
+            # Extract contract addresses from the tweet text
+            contract_addresses = []
+            for pattern in matched_patterns:
+                if pattern == "0x[a-fA-F0-9]{40}":  # This is our Ethereum address pattern
+                    # Find all matches in the tweet text
+                    addresses = re.findall(r"0x[a-fA-F0-9]{40}", tweet_text)
+                    contract_addresses.extend(addresses)
+            
+            # Create crypto-specific message format
             message = f"Username: @{username}\n"
             
-            # Add matched patterns
-            if matched_patterns:
-                message += f"Matched: {', '.join(matched_patterns)}\n"
+            # Add contract addresses if found
+            if contract_addresses:
+                message += f"Contract: {', '.join(contract_addresses)}\n"
+            else:
+                message += "No CA found\n"
             
             # Add tweet text if configured
             if self.config["telegram"]["include_tweet_text"]:
@@ -254,23 +317,46 @@ class TwitterMonitor:
             message += f"Link: {tweet_url}\n"
             message += f"Time: {timestamp}"
             
-            # Send to channel or chat
+            # Send to primary channel
+            sent_successfully = False
             channel_id = self.config["telegram"]["channel_id"]
-            self.telegram_bot.send_message(
-                chat_id=channel_id,
-                text=message,
-                disable_web_page_preview=False
-            )
+            if channel_id:
+                try:
+                    self.telegram_bot.send_message(
+                        chat_id=channel_id,
+                        text=message,
+                        disable_web_page_preview=False
+                    )
+                    sent_successfully = True
+                    logger.info(f"Sent notification to primary Telegram channel for @{username}")
+                except Exception as e:
+                    logger.error(f"Error sending to primary Telegram channel: {e}")
+            
+            # Send to additional configured destinations
+            forwarding_destinations = self.config["telegram"].get("forwarding_destinations", [])
+            for destination in forwarding_destinations:
+                dest_chat_id = destination.get("chat_id")
+                if dest_chat_id:
+                    try:
+                        self.telegram_bot.send_message(
+                            chat_id=dest_chat_id,
+                            text=message,
+                            disable_web_page_preview=False
+                        )
+                        sent_successfully = True
+                        logger.info(f"Forwarded notification to {dest_chat_id} for @{username}")
+                    except Exception as e:
+                        logger.error(f"Error forwarding to Telegram destination {dest_chat_id}: {e}")
             
             # Update database
-            self.cursor.execute(
-                "UPDATE matches SET sent_to_telegram = ? WHERE tweet_id = ?",
-                (True, tweet_id)
-            )
-            self.conn.commit()
-            
-            logger.info(f"Sent notification to Telegram for @{username}")
-            return True
+            if sent_successfully:
+                self.cursor.execute(
+                    "UPDATE matches SET sent_to_telegram = ? WHERE tweet_id = ?",
+                    (True, tweet_id)
+                )
+                self.conn.commit()
+                
+            return sent_successfully
         except Exception as e:
             logger.error(f"Error sending to Telegram: {e}")
             return False

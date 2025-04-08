@@ -2,6 +2,7 @@
 import logging
 import os
 import sys
+import re
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from twitter_monitor import TwitterMonitor
@@ -47,6 +48,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list_keywords - List all monitored keywords\n"
         "/add_pattern pattern - Add regex pattern to monitor\n"
         "/list_patterns - List all monitored patterns\n"
+        "/add_destination chatID - Add Telegram forwarding destination\n"
+        "/list_destinations - List all Telegram forwarding destinations\n"
+        "/remove_destination chatID - Remove a Telegram forwarding destination\n"
         "/help - Show this help message"
     )
 
@@ -85,7 +89,7 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please specify at least one username to check. Example: /check @user1 @user2")
         return
     
-    await update.message.reply_text(f"🔍 Checking {len(context.args)} users...")
+    await update.message.reply_text(f"🔍 Checking {len(context.args)} users for contract addresses...")
     
     # Clean usernames (remove @ if present)
     usernames = [username.replace('@', '') for username in context.args]
@@ -97,17 +101,37 @@ async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Run check
     monitor.check_tweets()
     
-    # Restore original usernames
-    monitor.update_usernames(original_usernames)
-    
     # Get recent matches
     matches = monitor.get_recent_matches(10)
     
     # Filter matches for the specified users
     user_matches = [m for m in matches if m["username"].replace('@', '') in usernames]
     
+    # Restore original usernames
+    monitor.update_usernames(original_usernames)
+    
     if user_matches:
-        await update.message.reply_text(f"✅ Found {len(user_matches)} matches from specified users.")
+        response = f"✅ Found {len(user_matches)} matches:\n\n"
+        
+        for match in user_matches:
+            # Extract contract addresses
+            contract_addresses = []
+            for pattern in match["matched_pattern"]:
+                if pattern == "0x[a-fA-F0-9]{40}":  # Ethereum address pattern
+                    # Find all matches in the tweet text
+                    addresses = re.findall(r"0x[a-fA-F0-9]{40}", match["tweet_text"])
+                    contract_addresses.extend(addresses)
+            
+            # Format the message
+            response += f"Username: {match['username']}\n"
+            if contract_addresses:
+                response += f"Contract: {', '.join(contract_addresses)}\n"
+            else:
+                response += "No CA found\n"
+            response += f"Link: {match['tweet_url']}\n"
+            response += f"Time: {match['timestamp']}\n\n"
+        
+        await update.message.reply_text(response)
     else:
         await update.message.reply_text("No matches found for the specified users.")
 
@@ -311,6 +335,84 @@ async def list_patterns_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     await update.message.reply_text(response)
 
+async def add_destination_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a Telegram forwarding destination."""
+    if not context.args:
+        await update.message.reply_text("Please specify a chat ID to add. Example: /add_destination -1001234567890")
+        return
+    
+    # Get chat ID to add
+    new_chat_id = context.args[0].strip()
+    
+    # Get current destinations or initialize empty list
+    if 'forwarding_destinations' not in monitor.config['telegram']:
+        monitor.config['telegram']['forwarding_destinations'] = []
+    
+    current_destinations = monitor.config['telegram']['forwarding_destinations']
+    
+    # Check if already exists
+    exists = False
+    for dest in current_destinations:
+        if dest['chat_id'] == new_chat_id:
+            exists = True
+            break
+    
+    if exists:
+        await update.message.reply_text(f"Destination {new_chat_id} already exists")
+    else:
+        current_destinations.append({'chat_id': new_chat_id})
+        monitor.config['telegram']['forwarding_destinations'] = current_destinations
+        monitor.save_config()
+        await update.message.reply_text(f"✅ Added Telegram destination: {new_chat_id}")
+
+async def list_destinations_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all Telegram forwarding destinations."""
+    if 'forwarding_destinations' not in monitor.config['telegram']:
+        monitor.config['telegram']['forwarding_destinations'] = []
+    
+    current_destinations = monitor.config['telegram']['forwarding_destinations']
+    
+    if not current_destinations:
+        await update.message.reply_text("No forwarding destinations configured.")
+        return
+    
+    response = f"Telegram forwarding destinations ({len(current_destinations)}):\n\n"
+    for idx, dest in enumerate(current_destinations):
+        response += f"{idx+1}. Chat ID: {dest['chat_id']}\n"
+    
+    # Also show the primary channel
+    primary_channel = monitor.config['telegram']['channel_id']
+    if primary_channel:
+        response += f"\nPrimary channel ID: {primary_channel}"
+    
+    await update.message.reply_text(response)
+
+async def remove_destination_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a Telegram forwarding destination."""
+    if not context.args:
+        await update.message.reply_text("Please specify a chat ID to remove. Example: /remove_destination -1001234567890")
+        return
+    
+    # Get chat ID to remove
+    remove_id = context.args[0].strip()
+    
+    # Get current destinations or initialize empty list
+    if 'forwarding_destinations' not in monitor.config['telegram']:
+        monitor.config['telegram']['forwarding_destinations'] = []
+    
+    current_destinations = monitor.config['telegram']['forwarding_destinations']
+    initial_count = len(current_destinations)
+    
+    # Filter out the destination to remove
+    updated_destinations = [dest for dest in current_destinations if dest['chat_id'] != remove_id]
+    
+    if len(updated_destinations) < initial_count:
+        monitor.config['telegram']['forwarding_destinations'] = updated_destinations
+        monitor.save_config()
+        await update.message.reply_text(f"✅ Removed Telegram destination: {remove_id}")
+    else:
+        await update.message.reply_text(f"Destination {remove_id} not found")
+
 def main():
     """Start the bot."""
     # Get bot token from config
@@ -339,6 +441,9 @@ def main():
     application.add_handler(CommandHandler("list_keywords", list_keywords_command))
     application.add_handler(CommandHandler("add_pattern", add_pattern_command))
     application.add_handler(CommandHandler("list_patterns", list_patterns_command))
+    application.add_handler(CommandHandler("add_destination", add_destination_command))
+    application.add_handler(CommandHandler("list_destinations", list_destinations_command))
+    application.add_handler(CommandHandler("remove_destination", remove_destination_command))
     
     # Start the bot
     print("Starting Telegram bot...")

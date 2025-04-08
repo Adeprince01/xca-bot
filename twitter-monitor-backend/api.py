@@ -2,13 +2,30 @@
 import os
 import json
 import asyncio
+import logging
 import subprocess
 from typing import List, Dict, Any, Optional
-from datetime import datetime
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from datetime import datetime, timezone
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.jobstores.memory import MemoryJobStore
 from twitter_monitor import TwitterMonitor
+from collections import deque
+import aiofiles
+import aiofiles.os
+
+# Configure logging
+logging.basicConfig(
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    level=logging.INFO,
+    filename='twitter_monitor.log'
+)
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -29,8 +46,44 @@ app.add_middleware(
 # Initialize Twitter Monitor
 monitor = TwitterMonitor()
 
-# Background monitoring process
-monitoring_process = None
+# Initialize APScheduler
+scheduler = AsyncIOScheduler(
+    jobstores={'default': MemoryJobStore()},
+    timezone=timezone.utc
+)
+
+# Job ID for the monitoring task
+MONITOR_JOB_ID = 'twitter_monitor'
+
+# Create an in-memory buffer for recent logs
+log_buffer = deque(maxlen=1000)  # Keep last 1000 log entries
+
+class LogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            log_entry = self.format(record)
+            log_buffer.append(log_entry)
+        except Exception:
+            self.handleError(record)
+
+# Add our custom handler to the logger
+log_handler = LogHandler()
+log_handler.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+logger.addHandler(log_handler)
+
+# Event queues for SSE
+status_updates = asyncio.Queue()
+match_updates = asyncio.Queue()
+
+# Start scheduler on app startup
+@app.on_event("startup")
+async def startup_event():
+    scheduler.start()
+
+# Shutdown scheduler on app shutdown
+@app.on_event("shutdown")
+async def shutdown_event():
+    scheduler.shutdown()
 
 # Pydantic models for request/response validation
 class TwitterConfig(BaseModel):
@@ -82,47 +135,38 @@ class MessageResponse(BaseModel):
     message: str
     success: bool
 
-# Helper functions
-def is_monitor_running():
-    """Check if the monitor process is running."""
-    pid_file = 'twitter_monitor.pid'
-    if os.path.exists(pid_file):
-        with open(pid_file, 'r') as f:
-            pid = int(f.read().strip())
-        try:
-            os.kill(pid, 0)  # Check if process exists
-            return True, pid
-        except ProcessLookupError:
-            os.remove(pid_file)
-    return False, None
+async def monitor_job():
+    """The monitoring job that will be scheduled."""
+    try:
+        logger.info("Running scheduled check")
+        matches = await monitor.check_tweets()
+        logger.info("Scheduled check completed")
+        
+        # Push any new matches to the match_updates queue
+        if matches:
+            for match in matches:
+                await match_updates.put(match)
+                logger.info(f"New match found: {match['username']} - {match['tweet_id']}")
+    except Exception as e:
+        logger.error(f"Error in monitoring job: {str(e)}")
+        raise
 
-def start_monitor_process():
-    """Start the monitor process in the background."""
-    global monitoring_process
-    if monitoring_process is not None and monitoring_process.poll() is None:
-        return  # Process is already running
+def get_job_status():
+    """Get the current status of the monitoring job."""
+    job = scheduler.get_job(MONITOR_JOB_ID)
+    if not job:
+        return False, None, None
     
-    # Start in a new process
-    monitoring_process = subprocess.Popen(
-        ["python", "cli.py", "start"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=os.path.dirname(os.path.abspath(__file__))
-    )
-
-def stop_monitor_process():
-    """Stop the monitor process."""
-    is_running, pid = is_monitor_running()
-    if is_running and pid:
-        try:
-            os.kill(pid, 15)  # SIGTERM
-            if os.path.exists('twitter_monitor.pid'):
-                os.remove('twitter_monitor.pid')
-            return True
-        except ProcessLookupError:
-            if os.path.exists('twitter_monitor.pid'):
-                os.remove('twitter_monitor.pid')
-    return False
+    # Calculate uptime if job is running
+    start_time = job.next_run_time
+    if start_time:
+        now = datetime.now(timezone.utc)
+        uptime = now - start_time
+        uptime_str = str(uptime).split('.')[0]  # Remove microseconds
+    else:
+        uptime_str = None
+    
+    return True, job.next_run_time, uptime_str
 
 # API Routes
 @app.get("/", response_model=MessageResponse)
@@ -133,7 +177,7 @@ async def root():
 @app.get("/status", response_model=StatusResponse)
 async def get_status():
     """Get the current status of the monitor."""
-    is_running, pid = is_monitor_running()
+    is_running, next_run, uptime = get_job_status()
     
     # Get config info
     usernames = monitor.config["monitoring"]["usernames"]
@@ -141,23 +185,21 @@ async def get_status():
     keywords = monitor.config["monitoring"]["keywords"]
     interval = monitor.config["monitoring"]["check_interval_minutes"]
     
-    # Get uptime if running
-    uptime = None
+    # Get last check time from logs if available
     last_check = None
-    if is_running and pid:
-        try:
-            with open('twitter_monitor.log', 'r') as f:
-                logs = f.readlines()
-                for line in reversed(logs):
-                    if "Checking" in line and "users for updates" in line:
-                        last_check = line.split(']')[0].strip('[')
-                        break
-        except:
-            pass
+    try:
+        with open('twitter_monitor.log', 'r') as f:
+            logs = f.readlines()
+            for line in reversed(logs):
+                if "Running scheduled check" in line:
+                    last_check = line.split(']')[0].strip('[')
+                    break
+    except Exception as e:
+        logger.warning(f"Error reading log file: {str(e)}")
     
     return {
         "is_running": is_running,
-        "pid": pid,
+        "pid": None,  # No longer using PIDs
         "uptime": uptime,
         "monitored_users": len(usernames),
         "regex_patterns": len(patterns),
@@ -167,10 +209,11 @@ async def get_status():
     }
 
 @app.post("/start", response_model=MessageResponse)
-async def start_monitoring(background_tasks: BackgroundTasks):
+async def start_monitoring():
     """Start the monitoring process."""
-    is_running, _ = is_monitor_running()
-    if is_running:
+    # Check if already running
+    job = scheduler.get_job(MONITOR_JOB_ID)
+    if job:
         return {"message": "Monitoring is already running", "success": False}
     
     # Check if configuration is complete
@@ -178,19 +221,42 @@ async def start_monitoring(background_tasks: BackgroundTasks):
         not monitor.config["telegram"]["bot_token"]):
         raise HTTPException(status_code=400, detail="Configuration incomplete. Please configure API keys first.")
     
-    # Start monitoring in background
-    background_tasks.add_task(start_monitor_process)
-    
-    return {"message": "Monitoring started", "success": True}
+    try:
+        # Get interval from config
+        interval_minutes = monitor.config["monitoring"]["check_interval_minutes"]
+        
+        # Add the job to the scheduler
+        scheduler.add_job(
+            monitor_job,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id=MONITOR_JOB_ID,
+            name='Twitter Monitor',
+            replace_existing=True
+        )
+        
+        # Run the job immediately
+        await monitor_job()
+        
+        logger.info("Monitoring started")
+        return {"message": "Monitoring started", "success": True}
+    except Exception as e:
+        logger.error(f"Error starting monitoring: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to start monitoring: {str(e)}")
 
 @app.post("/stop", response_model=MessageResponse)
 async def stop_monitoring():
     """Stop the monitoring process."""
-    success = stop_monitor_process()
-    if success:
-        return {"message": "Monitoring stopped", "success": True}
-    else:
+    job = scheduler.get_job(MONITOR_JOB_ID)
+    if not job:
         return {"message": "Monitoring is not running", "success": False}
+    
+    try:
+        scheduler.remove_job(MONITOR_JOB_ID)
+        logger.info("Monitoring stopped")
+        return {"message": "Monitoring stopped", "success": True}
+    except Exception as e:
+        logger.error(f"Error stopping monitoring: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to stop monitoring: {str(e)}")
 
 @app.get("/config", response_model=FullConfig)
 async def get_config():
@@ -225,15 +291,6 @@ async def get_matches(limit: int = 10):
         return {"matches": matches, "total": len(matches)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting matches: {str(e)}")
-
-@app.post("/check", response_model=MessageResponse)
-async def check_now(background_tasks: BackgroundTasks):
-    """Run a check immediately."""
-    try:
-        background_tasks.add_task(monitor.check_tweets)
-        return {"message": "Check started", "success": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error starting check: {str(e)}")
 
 @app.get("/users", response_model=List[str])
 async def get_users():
@@ -307,6 +364,139 @@ async def get_logs(limit: int = 100):
         return logs[-limit:] if limit < len(logs) else logs
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting logs: {str(e)}")
+
+@app.post("/check", response_model=MessageResponse)
+async def check_now():
+    """Run a check immediately."""
+    try:
+        # Run the monitoring job directly
+        await monitor_job()
+        return {"message": "Check completed", "success": True}
+    except Exception as e:
+        logger.error(f"Error running immediate check: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error running check: {str(e)}")
+
+async def status_event_generator():
+    """Generate status events for SSE."""
+    while True:
+        try:
+            # Get current status
+            is_running, next_run, uptime = get_job_status()
+            status_data = {
+                "is_running": is_running,
+                "next_run": next_run.isoformat() if next_run else None,
+                "uptime": uptime
+            }
+            
+            # Send status update
+            yield f"data: {json.dumps(status_data)}\n\n"
+            
+            # Wait before next update
+            await asyncio.sleep(5)  # Update every 5 seconds
+        except Exception as e:
+            logger.error(f"Error in status event generator: {str(e)}")
+            await asyncio.sleep(5)  # Wait before retry
+
+async def match_event_generator():
+    """Generate match events for SSE."""
+    while True:
+        try:
+            # Wait for new match
+            match_data = await match_updates.get()
+            yield f"data: {json.dumps(match_data)}\n\n"
+        except Exception as e:
+            logger.error(f"Error in match event generator: {str(e)}")
+            await asyncio.sleep(1)  # Wait before retry
+
+async def log_event_generator():
+    """Generate log events for SSE."""
+    # Send initial logs from buffer
+    for log_entry in log_buffer:
+        yield f"data: {json.dumps({'log': log_entry})}\n\n"
+    
+    # Create a queue for new logs
+    log_queue = asyncio.Queue()
+    
+    # Add queue to a set of active queues
+    active_queues.add(log_queue)
+    try:
+        while True:
+            # Wait for new log entry
+            log_entry = await log_queue.get()
+            yield f"data: {json.dumps({'log': log_entry})}\n\n"
+    finally:
+        # Remove queue when client disconnects
+        active_queues.remove(log_queue)
+
+# Set to keep track of active log queues
+active_queues = set()
+
+@app.get("/stream/status")
+async def stream_status():
+    """Stream status updates via SSE."""
+    return StreamingResponse(
+        status_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        }
+    )
+
+@app.get("/stream/matches")
+async def stream_matches():
+    """Stream new matches via SSE."""
+    return StreamingResponse(
+        match_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        }
+    )
+
+@app.get("/stream/logs")
+async def stream_logs():
+    """Stream log updates via SSE."""
+    return StreamingResponse(
+        log_event_generator(),
+        media_type="text/event-stream",
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        }
+    )
+
+# Add log management endpoints
+@app.post("/logs/clear", response_model=MessageResponse)
+async def clear_logs():
+    """Clear the log file."""
+    try:
+        # Clear the log buffer
+        log_buffer.clear()
+        
+        # Truncate the log file
+        async with aiofiles.open('twitter_monitor.log', 'w') as f:
+            await f.write('')
+        
+        logger.info("Log file cleared")
+        return {"message": "Logs cleared successfully", "success": True}
+    except Exception as e:
+        logger.error(f"Error clearing logs: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear logs: {str(e)}")
+
+@app.get("/logs/download")
+async def download_logs():
+    """Download the log file."""
+    try:
+        return StreamingResponse(
+            aiofiles.open('twitter_monitor.log', mode='rb'),
+            media_type='text/plain',
+            headers={'Content-Disposition': f'attachment; filename=twitter_monitor_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'}
+        )
+    except Exception as e:
+        logger.error(f"Error downloading logs: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to download logs: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

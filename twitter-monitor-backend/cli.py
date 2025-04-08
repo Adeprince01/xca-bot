@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import sys
+import re
 from twitter_monitor import TwitterMonitor
 
 def main():
@@ -17,6 +18,11 @@ def main():
     
     # Status command
     status_parser = subparsers.add_parser('status', help='Check monitoring status')
+    
+    # Check command
+    check_parser = subparsers.add_parser('check', help='Check specific users immediately')
+    check_parser.add_argument('usernames', nargs='+', help='Usernames to check (without @)')
+    check_parser.add_argument('--limit', type=int, default=10, help='Number of tweets to check per user')
     
     # Configure command
     config_parser = subparsers.add_parser('config', help='Configure the monitor')
@@ -48,6 +54,13 @@ def main():
     keywords_parser.add_argument('--remove', help='Remove keyword')
     keywords_parser.add_argument('--list', action='store_true', help='List all keywords')
     keywords_parser.add_argument('--file', help='Load keywords from file (one per line)')
+    
+    # Telegram destinations command
+    telegram_parser = subparsers.add_parser('telegram', help='Manage Telegram forwarding destinations')
+    telegram_parser.add_argument('--add', help='Add a Telegram destination chat ID')
+    telegram_parser.add_argument('--remove', help='Remove a Telegram destination by chat ID')
+    telegram_parser.add_argument('--list', action='store_true', help='List all Telegram destinations')
+    telegram_parser.add_argument('--clear', action='store_true', help='Clear all Telegram destinations')
     
     # Export command
     export_parser = subparsers.add_parser('export', help='Export matches to CSV')
@@ -106,6 +119,47 @@ def main():
                 os.remove(pid_file)
         else:
             print("Twitter/X Monitor is not running")
+    
+    elif args.command == 'check':
+        usernames = args.usernames
+        # Clean usernames (remove @ if present)
+        usernames = [username.replace('@', '') for username in usernames]
+        
+        print(f"🔍 Checking {len(usernames)} users for contract addresses...")
+        
+        # Temporarily update usernames
+        original_usernames = monitor.config["monitoring"]["usernames"]
+        monitor.update_usernames(usernames)
+        
+        # Run check
+        try:
+            monitor.check_tweets()
+            
+            # Get recent matches
+            matches = monitor.get_recent_matches(10)
+            
+            # Filter matches for the specified users
+            user_matches = [m for m in matches if m["username"].replace('@', '') in usernames]
+            
+            if user_matches:
+                print(f"✅ Found {len(user_matches)} matches:")
+                for match in user_matches:
+                    # Extract contract addresses
+                    contract_addresses = []
+                    for pattern in match["matched_pattern"]:
+                        if pattern == "0x[a-fA-F0-9]{40}":  # Ethereum address pattern
+                            addresses = re.findall(r"0x[a-fA-F0-9]{40}", match["tweet_text"])
+                            contract_addresses.extend(addresses)
+                    
+                    addresses_str = ', '.join(contract_addresses) if contract_addresses else "No CA found"
+                    print(f"Username: {match['username']} | Contract: {addresses_str} | Link: {match['tweet_url']} | Time: {match['timestamp']}")
+            else:
+                print("No contract addresses found for the specified users.")
+        except Exception as e:
+            print(f"Error checking users: {e}")
+        finally:
+            # Restore original usernames
+            monitor.update_usernames(original_usernames)
     
     elif args.command == 'config':
         # Update configuration
@@ -238,6 +292,84 @@ def main():
                 print(f"Loaded {len(new_keywords)} keywords from {args.file}")
             except Exception as e:
                 print(f"Error loading keywords from file: {e}")
+        
+        elif args.command == 'telegram':
+            # Get current destinations or initialize empty list
+            if 'forwarding_destinations' not in monitor.config['telegram']:
+                monitor.config['telegram']['forwarding_destinations'] = []
+            
+            current_destinations = monitor.config['telegram']['forwarding_destinations']
+            
+            if args.list:
+                print(f"Telegram forwarding destinations ({len(current_destinations)}):")
+                for idx, dest in enumerate(current_destinations):
+                    print(f"{idx+1}. Chat ID: {dest['chat_id']}")
+                
+                # Also show the primary channel
+                primary_channel = monitor.config['telegram']['channel_id']
+                if primary_channel:
+                    print(f"\nPrimary channel ID: {primary_channel}")
+            
+            elif args.add:
+                new_chat_id = args.add.strip()
+                
+                # Check if already exists
+                exists = False
+                for dest in current_destinations:
+                    if dest['chat_id'] == new_chat_id:
+                        exists = True
+                        break
+                
+                if exists:
+                    print(f"Destination {new_chat_id} already exists")
+                else:
+                    current_destinations.append({'chat_id': new_chat_id})
+                    monitor.config['telegram']['forwarding_destinations'] = current_destinations
+                    try:
+                        monitor.save_config()
+                        print(f"Added Telegram destination: {new_chat_id}")
+                        print(f"Updated config: {json.dumps(monitor.config['telegram'], indent=2)}")
+                    except Exception as e:
+                        print(f"Error saving configuration: {e}")
+                        print("Adding destination manually...")
+                        # Fallback to manually writing the config
+                        try:
+                            with open('config.json', 'r') as f:
+                                config = json.load(f)
+                            
+                            if 'telegram' not in config:
+                                config['telegram'] = {}
+                            
+                            if 'forwarding_destinations' not in config['telegram']:
+                                config['telegram']['forwarding_destinations'] = []
+                            
+                            config['telegram']['forwarding_destinations'].append({'chat_id': new_chat_id})
+                            
+                            with open('config.json', 'w') as f:
+                                json.dump(config, f, indent=4)
+                            
+                            print(f"Successfully added destination {new_chat_id} to config.json")
+                        except Exception as e:
+                            print(f"Failed to manually update config.json: {e}")
+            
+            elif args.remove:
+                remove_id = args.remove.strip()
+                initial_count = len(current_destinations)
+                
+                # Filter out the destination to remove
+                updated_destinations = [dest for dest in current_destinations if dest['chat_id'] != remove_id]
+                
+                if len(updated_destinations) < initial_count:
+                    monitor.config['telegram']['forwarding_destinations'] = updated_destinations
+                    monitor.save_config()
+                    print(f"Removed Telegram destination: {remove_id}")
+                else:
+                    print(f"Destination {remove_id} not found")
+            
+            elif args.clear:
+                monitor.config['telegram']['forwarding_destinations'] = []
+                monitor.save_config()
+                print("Cleared all Telegram forwarding destinations")
     
     elif args.command == 'export':
         filename = args.file

@@ -40,6 +40,7 @@ monitoring:
   regex_patterns:
     - "0x[a-fA-F0-9]{40}"  # Ethereum/BSC
     - "[1-9A-HJ-NP-Za-km-z]{26,35}"  # Bitcoin-like
+    - "$[A-Za-z][A-Za-z0-9]+"  # ticker
   
   # Keywords to look for in tweets (optional)
   keywords:

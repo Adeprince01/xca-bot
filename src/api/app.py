@@ -77,5 +77,68 @@ async def root():
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy"} 
+    """Basic health check endpoint."""
+    return {"status": "healthy"}
+
+# Enhanced API health check endpoint that doesn't depend on monitor service
+@app.get("/api/v1/health")
+async def api_health_check():
+    """API health check that reports detailed service status information."""
+    try:
+        from src.api.server import get_monitor_service
+        monitor = get_monitor_service()
+        monitor_available = monitor is not None
+        
+        # Get detailed service status if monitor is available
+        services_status = {
+            "monitor": {
+                "available": monitor_available,
+                "initialized": False,
+                "running": False,
+            }
+        }
+        
+        if monitor_available:
+            services_status["monitor"]["initialized"] = monitor.initialized
+            services_status["monitor"]["running"] = monitor.is_running if hasattr(monitor, "is_running") else False
+            
+            # Add Twitter and Telegram service status if possible
+            if hasattr(monitor, "twitter_service") and monitor.twitter_service:
+                services_status["twitter"] = {
+                    "available": True,
+                    "initialized": monitor.twitter_service.initialized if hasattr(monitor.twitter_service, "initialized") else False,
+                }
+            else:
+                services_status["twitter"] = {"available": False}
+                
+            if hasattr(monitor, "telegram_service") and monitor.telegram_service:
+                services_status["telegram"] = {
+                    "available": True,
+                    "initialized": monitor.telegram_service.initialized if hasattr(monitor.telegram_service, "initialized") else False,
+                }
+            else:
+                services_status["telegram"] = {"available": False}
+                
+            if hasattr(monitor, "db_repo") and monitor.db_repo:
+                services_status["database"] = {
+                    "available": True,
+                    "connected": True if hasattr(monitor.db_repo, "connected") and monitor.db_repo.connected else "Unknown"
+                }
+            else:
+                services_status["database"] = {"available": False}
+                
+    except Exception as e:
+        monitor_available = False
+        services_status = {
+            "monitor": {"available": False, "error": str(e)},
+            "twitter": {"available": False},
+            "telegram": {"available": False},
+            "database": {"available": False}
+        }
+    
+    return {
+        "status": "available",
+        "api_version": app.version,
+        "services": services_status,
+        "timestamp": time.time()
+    } 

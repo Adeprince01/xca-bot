@@ -147,6 +147,11 @@ class TwitterService:
                             if addresses:
                                 matched_patterns.append(pattern_str)
                                 matched_contract_addresses.extend(addresses)
+                        elif pattern_str == "$[A-Za-z][A-Za-z0-9]+":  # Ticker symbol pattern
+                            tickers = pattern.findall(tweet_text)
+                            if tickers:
+                                matched_patterns.append(pattern_str)
+                                matched_contract_addresses.extend(tickers)
                         elif pattern.search(tweet_text):
                             matched_patterns.append(pattern_str)
                     

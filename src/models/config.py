@@ -71,13 +71,13 @@ class TelegramConfig(BaseModel):
 
 class DatabaseConfig(BaseModel):
     """Database configuration."""
-    connection_string: str = Field("sqlite:///xca_bot.db", description="Database connection string")
+    connection_string: str = Field("sqlite+aiosqlite:///xca_bot.db", description="Database connection string")
     
     @classmethod
     def from_env(cls):
         """Create configuration from environment variables."""
         return cls(
-            connection_string=os.getenv("DATABASE_URL", "sqlite:///xca_bot.db")
+            connection_string=os.getenv("DATABASE_URL", "sqlite+aiosqlite:///xca_bot.db")
         )
 
 

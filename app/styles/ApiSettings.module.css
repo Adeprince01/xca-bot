@@ -1,0 +1,236 @@
+.apiSettings {
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 100%;
+}
+
+.apiSettings h2 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+.notification {
+  padding: 0.75rem 1rem;
+  border-radius: 5px;
+  margin-bottom: 1.5rem;
+}
+
+.success {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.error {
+  padding: 0.75rem 1rem;
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+  border-radius: 5px;
+  margin-bottom: 1.5rem;
+}
+
+.loading {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: #6b7280;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  border: 1px dashed #d1d5db;
+}
+
+.settingsForms {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.settingsForm {
+  padding: 1.25rem;
+  background-color: #f9fafb;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+
+.settingsForm h3 {
+  margin-top: 0;
+  margin-bottom: 1.25rem;
+  color: #1f2937;
+  font-size: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.settingsForm h4 {
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+  color: #4b5563;
+  font-size: 1rem;
+}
+
+.settingsForm h5 {
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+  color: #4b5563;
+  font-size: 0.9375rem;
+}
+
+.formGroup {
+  margin-bottom: 1rem;
+}
+
+.formGroup label {
+  display: block;
+  margin-bottom: 0.375rem;
+  color: #4b5563;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.formInput {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font-size: 0.875rem;
+  background-color: white;
+}
+
+.inputWithButton {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.inputWithButton .formInput {
+  flex: 1;
+}
+
+.testButton {
+  padding: 0.625rem 1rem;
+  background-color: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  white-space: nowrap;
+}
+
+.testButton:hover:not(:disabled) {
+  background-color: #4b5563;
+}
+
+.testButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.destinations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.destination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background-color: white;
+  border-radius: 5px;
+  border: 1px solid #e5e7eb;
+}
+
+.destinationDetails {
+  flex: 1;
+}
+
+.chatId {
+  font-weight: 500;
+  color: #111827;
+  font-size: 0.875rem;
+}
+
+.description {
+  color: #6b7280;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.destinationActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.removeButton {
+  padding: 0.25rem 0.5rem;
+  background-color: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.removeButton:hover {
+  background-color: #dc2626;
+}
+
+.addDestination {
+  padding: 1rem;
+  background-color: #f3f4f6;
+  border-radius: 5px;
+  margin-bottom: 1.25rem;
+}
+
+.addButton {
+  padding: 0.5rem 0.75rem;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.addButton:hover:not(:disabled) {
+  background-color: #2563eb;
+}
+
+.addButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.saveButton {
+  padding: 0.625rem 1.25rem;
+  background-color: #10b981;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: block;
+  margin-left: auto;
+}
+
+.saveButton:hover:not(:disabled) {
+  background-color: #059669;
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+} 

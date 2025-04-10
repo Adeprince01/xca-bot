@@ -1,0 +1,166 @@
+.usernameManager {
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 100%;
+}
+
+.usernameManager h2 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  color: #333;
+  font-size: 1.5rem;
+}
+
+.notification {
+  padding: 0.75rem 1rem;
+  border-radius: 5px;
+  margin-bottom: 1.5rem;
+}
+
+.success {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.error {
+  padding: 0.75rem 1rem;
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+  border-radius: 5px;
+  margin-bottom: 1.5rem;
+}
+
+.addUserForm {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.usernameInput {
+  flex: 1;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font-size: 0.875rem;
+}
+
+.addButton {
+  padding: 0.625rem 1rem;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  white-space: nowrap;
+}
+
+.addButton:hover:not(:disabled) {
+  background-color: #2563eb;
+}
+
+.addButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.loading {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: #6b7280;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  border: 1px dashed #d1d5db;
+}
+
+.emptyState {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: #6b7280;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  border: 1px dashed #d1d5db;
+  margin-bottom: 1.5rem;
+}
+
+.emptyState p {
+  margin: 0.5rem 0;
+}
+
+.emptyState p:first-child {
+  font-weight: 600;
+  font-size: 1.125rem;
+  color: #4b5563;
+}
+
+.usernameList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.usernameItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background-color: #f9fafb;
+  border-radius: 5px;
+  border: 1px solid #e5e7eb;
+}
+
+.username {
+  font-weight: 500;
+  color: #111827;
+}
+
+.removeButton {
+  padding: 0.25rem 0.5rem;
+  background-color: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.removeButton:hover {
+  background-color: #dc2626;
+}
+
+.actionButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.saveButton {
+  padding: 0.625rem 1.25rem;
+  background-color: #10b981;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.saveButton:hover:not(:disabled) {
+  background-color: #059669;
+}
+
+.saveButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+} 

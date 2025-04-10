@@ -30,14 +30,23 @@ class MonitorService:
         self._running = False
         self._task = None
         
+        # Service status tracking
+        self.status = {
+            "database": False,
+            "twitter": False,
+            "telegram": False,
+            "last_error": None
+        }
+        
         # Event listeners for match events
         self.on_match_callbacks = []
     
-    async def init(self, config: AppConfig) -> bool:
+    async def init(self, config: AppConfig, max_retries: int = 3) -> bool:
         """Initialize services with configuration.
         
         Args:
             config: Application configuration
+            max_retries: Maximum number of database connection retries
             
         Returns:
             bool: True if initialization was successful
@@ -45,40 +54,73 @@ class MonitorService:
         dev_log("Initializing core monitoring service", "INFO")
         self.config = config
         
-        # Initialize database repository
+        # Initialize database repository with retries
         self.db_repo = DatabaseRepository(db_url=config.database.connection_string)
         
-        # Initialize database
-        try:
-            await self.db_repo.init_db()
-            dev_log("Database initialized", "DONE")
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-            return False
+        # Initialize database with retries
+        for attempt in range(max_retries):
+            try:
+                await self.db_repo.init_db()
+                self.status["database"] = True
+                dev_log("Database initialized", "DONE")
+                break
+            except Exception as e:
+                wait_time = (attempt + 1) * 2  # Exponential backoff
+                logger.warning(f"Database initialization attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")
+                self.status["last_error"] = f"Database error: {str(e)}"
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to initialize database after {max_retries} attempts: {e}")
+                    return False
         
         # Initialize Twitter service
-        twitter_ok = await self.twitter_service.setup(config.twitter)
-        if not twitter_ok:
-            dev_log("Twitter API initialization failed", "NOTE")
+        try:
+            twitter_ok = await self.twitter_service.setup(config.twitter)
+            self.status["twitter"] = twitter_ok
+            if not twitter_ok:
+                dev_log("Twitter API initialization failed", "NOTE")
+                self.status["last_error"] = "Twitter API initialization failed"
+        except Exception as e:
+            logger.error(f"Twitter service setup error: {e}")
+            self.status["last_error"] = f"Twitter error: {str(e)}"
+            self.status["twitter"] = False
         
         # Initialize Telegram service
-        telegram_ok = await self.telegram_service.setup(config.telegram)
-        if not telegram_ok:
-            dev_log("Telegram bot initialization failed", "NOTE")
+        try:
+            telegram_ok = await self.telegram_service.setup(config.telegram)
+            self.status["telegram"] = telegram_ok
+            if not telegram_ok:
+                dev_log("Telegram bot initialization failed", "NOTE")
+                if not self.status["last_error"]:
+                    self.status["last_error"] = "Telegram bot initialization failed"
+        except Exception as e:
+            logger.error(f"Telegram service setup error: {e}")
+            if not self.status["last_error"]:
+                self.status["last_error"] = f"Telegram error: {str(e)}"
+            self.status["telegram"] = False
         
-        # We consider initialization successful if at least one service is working
-        self.initialized = twitter_ok or telegram_ok
+        # We require database and at least one notification service
+        self.initialized = self.status["database"] and (self.status["twitter"] or self.status["telegram"])
         
         if self.initialized:
             # Try to send startup notification
-            if telegram_ok:
-                await self.telegram_service.send_system_message(
-                    "XCA-Bot started successfully and is ready to monitor Twitter for contract addresses."
-                )
+            if self.status["telegram"]:
+                try:
+                    await self.telegram_service.send_system_message(
+                        "XCA-Bot started successfully and is ready to monitor Twitter for contract addresses."
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send startup notification: {e}")
             
             dev_log("Core monitoring service initialized", "DONE")
         else:
-            logger.error("Failed to initialize monitoring service - no working services")
+            error_msg = "Failed to initialize monitoring service - "
+            if not self.status["database"]:
+                error_msg += "database connection failed, "
+            if not self.status["twitter"] and not self.status["telegram"]:
+                error_msg += "no working notification services"
+            logger.error(error_msg)
         
         return self.initialized
     

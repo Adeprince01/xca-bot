@@ -5,7 +5,7 @@ This module defines the FastAPI routes for the XCA-Bot API.
 """
 
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from pydantic import BaseModel
 
 from src.core.logger import logger, dev_log
@@ -56,113 +56,184 @@ class SimpleResponse(BaseModel):
     """Simple response model with success status and message."""
     success: bool
     message: str
+    error: Optional[str] = None
 
 # Dependency for accessing the monitor service
 def get_monitor_service():
     """Provides the monitor service instance."""
-    # In a real application, this would be retrieved from a global state
-    # or dependency injection system. For simplicity, we'll assume it's
-    # initialized elsewhere and available here.
-    from main import monitor_service
-    return monitor_service
+    from src.api.server import get_monitor_service as get_global_monitor
+    monitor = get_global_monitor()
+    if not monitor:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
+            detail="Service unavailable. Monitor not initialized."
+        )
+    return monitor
+
+
+# Enhanced dependency that checks if the monitor is properly initialized
+def require_initialized_monitor():
+    """Requires the monitor service to be fully initialized."""
+    monitor = get_monitor_service()
+    if not monitor.initialized:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Monitor service is not initialized. Please check configuration."
+        )
+    return monitor
+
+
+# Dependency for Twitter service
+def require_twitter_service():
+    """Requires the Twitter service to be initialized."""
+    monitor = require_initialized_monitor()
+    if not hasattr(monitor, "twitter_service") or not monitor.twitter_service:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Twitter service is not available."
+        )
+    if not monitor.twitter_service.initialized:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Twitter service is not initialized. Please check API credentials."
+        )
+    return monitor
+
+
+# Dependency for Telegram service
+def require_telegram_service():
+    """Requires the Telegram service to be initialized."""
+    monitor = require_initialized_monitor()
+    if not hasattr(monitor, "telegram_service") or not monitor.telegram_service:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Telegram service is not available."
+        )
+    if not monitor.telegram_service.initialized:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Telegram service is not initialized. Please check bot token."
+        )
+    return monitor
 
 
 @router.get("/status", response_model=StatusResponse)
 async def get_status(monitor: MonitorService = Depends(get_monitor_service)):
     """Get the current status of the monitor."""
-    status = await monitor.get_status()
-    return StatusResponse(**status)
+    try:
+        status = await monitor.get_status()
+        return StatusResponse(**status)
+    except Exception as e:
+        logger.error(f"Error getting status: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting monitor status: {str(e)}"
+        )
 
 
-@router.post("/start", response_model=SimpleResponse)
+@router.post("/monitoring/start", response_model=SimpleResponse)
 async def start_monitoring(
     background_tasks: BackgroundTasks,
-    monitor: MonitorService = Depends(get_monitor_service)
+    monitor: MonitorService = Depends(require_initialized_monitor)
 ):
     """Start the monitoring process."""
-    if not monitor.initialized:
-        raise HTTPException(status_code=400, detail="Monitor not initialized")
-    
     dev_log("API request: Start monitoring", "INFO")
     
-    # Start monitoring in the background
-    background_tasks.add_task(monitor.start_monitoring)
-    
-    return SimpleResponse(
-        success=True,
-        message="Monitoring process started"
-    )
+    try:
+        # Start monitoring in the background
+        background_tasks.add_task(monitor.start_monitoring)
+        
+        return SimpleResponse(
+            success=True,
+            message="Monitoring process started"
+        )
+    except Exception as e:
+        logger.error(f"Error starting monitoring: {str(e)}", exc_info=True)
+        return SimpleResponse(
+            success=False,
+            message="Failed to start monitoring",
+            error=str(e)
+        )
 
 
-@router.post("/stop", response_model=SimpleResponse)
+@router.post("/monitoring/stop", response_model=SimpleResponse)
 async def stop_monitoring(
     background_tasks: BackgroundTasks,
-    monitor: MonitorService = Depends(get_monitor_service)
+    monitor: MonitorService = Depends(require_initialized_monitor)
 ):
     """Stop the monitoring process."""
-    if not monitor.initialized:
-        raise HTTPException(status_code=400, detail="Monitor not initialized")
-    
     dev_log("API request: Stop monitoring", "INFO")
     
-    # Stop monitoring in the background
-    background_tasks.add_task(monitor.stop_monitoring)
-    
-    return SimpleResponse(
-        success=True,
-        message="Monitoring process stopped"
-    )
+    try:
+        # Stop monitoring in the background
+        background_tasks.add_task(monitor.stop_monitoring)
+        
+        return SimpleResponse(
+            success=True,
+            message="Monitoring process stopped"
+        )
+    except Exception as e:
+        logger.error(f"Error stopping monitoring: {str(e)}", exc_info=True)
+        return SimpleResponse(
+            success=False,
+            message="Failed to stop monitoring",
+            error=str(e)
+        )
 
 
 @router.post("/check", response_model=List[MatchResponse])
 async def check_now(
     request: Optional[CheckRequest] = None,
-    monitor: MonitorService = Depends(get_monitor_service)
+    monitor: MonitorService = Depends(require_twitter_service)
 ):
     """Run an immediate check for contract addresses."""
-    if not monitor.initialized:
-        raise HTTPException(status_code=400, detail="Monitor not initialized")
-    
-    if not monitor.twitter_service.initialized:
-        raise HTTPException(status_code=400, detail="Twitter API not configured")
-    
     dev_log("API request: Check now", "INFO")
     
     # Use provided usernames or default to configured ones
     usernames = request.usernames if request and request.usernames else monitor.config.monitoring.usernames
     
     if not usernames:
-        raise HTTPException(status_code=400, detail="No usernames configured or provided")
-    
-    # Get configured patterns and keywords
-    patterns = monitor.config.monitoring.regex_patterns
-    keywords = monitor.config.monitoring.keywords
-    
-    # Run check
-    matches = await monitor.twitter_service.check_tweets(
-        usernames=usernames,
-        regex_patterns=patterns,
-        keywords=keywords
-    )
-    
-    # Process matches if any found
-    if matches:
-        await monitor._process_matches(matches)
-    
-    # Convert matches to response model
-    return [
-        MatchResponse(
-            id=match.id,
-            username=match.username,
-            tweet_id=match.tweet_id,
-            tweet_text=match.tweet_text,
-            matched_patterns=match.matched_patterns,
-            contract_addresses=match.contract_addresses,
-            timestamp=match.timestamp.isoformat(),
-            tweet_url=match.tweet_url
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="No usernames configured or provided"
         )
-        for match in matches
-    ]
+    
+    try:
+        # Get configured patterns and keywords
+        patterns = monitor.config.monitoring.regex_patterns
+        keywords = monitor.config.monitoring.keywords
+        
+        # Run check
+        matches = await monitor.twitter_service.check_tweets(
+            usernames=usernames,
+            regex_patterns=patterns,
+            keywords=keywords
+        )
+        
+        # Process matches if any found
+        if matches:
+            await monitor._process_matches(matches)
+        
+        # Convert matches to response model
+        return [
+            MatchResponse(
+                id=match.id,
+                username=match.username,
+                tweet_id=match.tweet_id,
+                tweet_text=match.tweet_text,
+                matched_patterns=match.matched_patterns,
+                contract_addresses=match.contract_addresses,
+                timestamp=match.timestamp.isoformat(),
+                tweet_url=match.tweet_url
+            )
+            for match in matches
+        ]
+    except Exception as e:
+        logger.error(f"Error checking tweets: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error checking tweets: {str(e)}"
+        )
 
 
 @router.get("/matches", response_model=List[MatchResponse])

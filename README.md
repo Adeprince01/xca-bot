@@ -120,7 +120,7 @@ TWITTER_ACCESS_TOKEN_SECRET=your_twitter_access_token_secret
 
 # Telegram Configuration
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_PRIMARY_CHANNEL_ID=-1001234567890
+TELEGRAM_PRIMARY_CHANNEL_ID=-
 
 # Database Configuration
 DATABASE_URL=sqlite:///xca_bot.db

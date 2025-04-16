@@ -47,4 +47,10 @@ settings.json
 htmlcov/
 
 # Node.js dependencies
-node_modules/ 
+node_modules/
+
+# New files to be added
+CHANGELOG.md
+FRONTEND_UPGRADE_PLAN.md
+implementation_plan.txt
+trackfix.txt 

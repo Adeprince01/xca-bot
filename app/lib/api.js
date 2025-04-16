@@ -150,7 +150,7 @@ export async function stopMonitoring() {
  */
 export async function checkNow() {
   try {
-    const result = await makeApiRequest('/monitoring/check-now', { method: 'POST' });
+    const result = await makeApiRequest('/check', { method: 'POST' });
     logger.info('Successfully triggered check');
     return result;
   } catch (error) {

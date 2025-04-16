@@ -73,7 +73,7 @@ export const stopMonitoring = () => {
 };
 
 export const checkNow = () => {
-  return apiCall('/monitoring/check-now', {
+  return apiCall('/check', {
     method: 'POST',
   });
 }; 

@@ -5,7 +5,7 @@ This module defines the FastAPI routes for the XCA-Bot API.
 """
 
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Body
 from pydantic import BaseModel
 
 from src.core.logger import logger, dev_log
@@ -362,4 +362,23 @@ async def test_telegram_destination(
         return TelegramTestResponse(
             success=False,
             message=f"Failed to send test message to {chat_id}"
-        ) 
+        )
+
+
+@router.put("/config", response_model=Dict[str, Any])
+async def update_config(
+    config_update: Dict[str, Any] = Body(...),
+    monitor: MonitorService = Depends(get_monitor_service)
+):
+    """Update the application configuration."""
+    if not monitor.initialized:
+        raise HTTPException(status_code=400, detail="Monitor not initialized")
+    try:
+        # Create a new AppConfig from the provided update
+        new_config = AppConfig.from_dict(config_update)
+        monitor.config = new_config
+        dev_log("Configuration updated via API", "INFO")
+        return monitor.config.to_dict()
+    except Exception as e:
+        logger.error(f"Failed to update config: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Failed to update config: {e}") 

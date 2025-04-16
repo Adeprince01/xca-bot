@@ -1,16 +1,18 @@
 .apiSettings {
-  background-color: white;
-  border-radius: 8px;
-  padding: 1.5rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background-color: var(--color-card, #fff);
+  border-radius: 14px;
+  padding: 2rem;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.08);
   width: 100%;
+  transition: box-shadow 0.2s, background 0.2s;
 }
 
 .apiSettings h2 {
-  margin-top: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--color-text, #23272f);
   margin-bottom: 1.5rem;
-  color: #333;
-  font-size: 1.5rem;
+  letter-spacing: -0.01em;
 }
 
 .notification {
@@ -50,33 +52,24 @@
 }
 
 .settingsForm {
-  padding: 1.25rem;
-  background-color: #f9fafb;
-  border-radius: 6px;
-  border: 1px solid #e5e7eb;
+  background-color: #f3f6fa;
+  border-radius: 10px;
+  border: none;
+  padding: 1.5rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
 
 .settingsForm h3 {
-  margin-top: 0;
-  margin-bottom: 1.25rem;
-  color: #1f2937;
-  font-size: 1.25rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid #e5e7eb;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--color-primary, #2563eb);
+  border-bottom: 2px solid var(--color-primary-light, #dbeafe);
+  padding-bottom: 0.5rem;
 }
 
-.settingsForm h4 {
-  margin-top: 1.5rem;
-  margin-bottom: 1rem;
-  color: #4b5563;
-  font-size: 1rem;
-}
-
-.settingsForm h5 {
-  margin-top: 1.25rem;
-  margin-bottom: 0.75rem;
-  color: #4b5563;
-  font-size: 0.9375rem;
+.settingsForm h4, .settingsForm h5 {
+  color: #64748b;
+  font-weight: 600;
 }
 
 .formGroup {
@@ -92,12 +85,17 @@
 }
 
 .formInput {
-  width: 100%;
-  padding: 0.625rem 0.75rem;
+  font-size: 1rem;
+  border-radius: 6px;
   border: 1px solid #d1d5db;
-  border-radius: 5px;
-  font-size: 0.875rem;
-  background-color: white;
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.formInput:focus {
+  border-color: var(--color-primary, #2563eb);
+  box-shadow: 0 0 0 2px var(--color-primary-light, #dbeafe);
 }
 
 .inputWithButton {
@@ -109,20 +107,19 @@
   flex: 1;
 }
 
+.testButton, .removeButton, .addButton, .saveButton {
+  font-weight: 700;
+  border-radius: 8px;
+  transition: background 0.2s, color 0.2s;
+}
+
 .testButton {
-  padding: 0.625rem 1rem;
-  background-color: #6b7280;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  white-space: nowrap;
+  background: var(--color-primary, #2563eb);
+  color: #fff;
 }
 
 .testButton:hover:not(:disabled) {
-  background-color: #4b5563;
+  background: #1d4ed8;
 }
 
 .testButton:disabled {
@@ -171,18 +168,12 @@
 }
 
 .removeButton {
-  padding: 0.25rem 0.5rem;
-  background-color: #ef4444;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
+  background: var(--color-error, #ef4444);
+  color: #fff;
 }
 
 .removeButton:hover {
-  background-color: #dc2626;
+  background: #b91c1c;
 }
 
 .addDestination {
@@ -193,18 +184,12 @@
 }
 
 .addButton {
-  padding: 0.5rem 0.75rem;
-  background-color: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: background-color 0.2s;
+  background: var(--color-success, #22c55e);
+  color: #fff;
 }
 
 .addButton:hover:not(:disabled) {
-  background-color: #2563eb;
+  background: #16a34a;
 }
 
 .addButton:disabled {
@@ -213,21 +198,12 @@
 }
 
 .saveButton {
-  padding: 0.625rem 1.25rem;
-  background-color: #10b981;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  display: block;
-  margin-left: auto;
+  background: var(--color-primary, #2563eb);
+  color: #fff;
 }
 
 .saveButton:hover:not(:disabled) {
-  background-color: #059669;
+  background: #1d4ed8;
 }
 
 .saveButton:disabled {

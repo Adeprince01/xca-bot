@@ -12,6 +12,34 @@ export default function StatusCard({ status }) {
     return date.toLocaleString();
   };
 
+  // Helper to get display info based on status string
+  const getStatusInfo = (statusType, statusValue) => {
+    switch (statusType) {
+      case 'twitter':
+        switch (statusValue) {
+          case 'connected': return { text: 'Connected', className: styles.active };
+          case 'permission_error': return { text: 'Limited Access', className: styles.warning };
+          case 'config_error': return { text: 'Config Error', className: styles.error };
+          case 'disconnected': return { text: 'Disconnected', className: styles.inactive };
+          default: return { text: statusValue || 'Unknown', className: styles.inactive }; // Display unknown status if received
+        }
+      case 'telegram':
+        switch (statusValue) {
+          case 'connected': return { text: 'Connected', className: styles.active };
+          case 'token_missing': return { text: 'Token Missing', className: styles.error };
+          case 'send_error': return { text: 'Send Error', className: styles.warning };
+          case 'disconnected': return { text: 'Disconnected', className: styles.inactive };
+          default: return { text: statusValue || 'Unknown', className: styles.inactive }; // Display unknown status if received
+        }
+      default:
+        return { text: 'N/A', className: styles.inactive };
+    }
+  };
+
+  // Get status display info
+  const twitterStatusInfo = getStatusInfo('twitter', status?.twitter_status); // Use new status?.twitter_status
+  const telegramStatusInfo = getStatusInfo('telegram', status?.telegram_status); // Use new status?.telegram_status
+
   return (
     <div className={styles.statusCard}>
       <h2>System Status</h2>
@@ -26,15 +54,15 @@ export default function StatusCard({ status }) {
 
         <div className={styles.item}>
           <div className={styles.label}>Twitter API</div>
-          <div className={`${styles.value} ${status.twitter_api_ok ? styles.active : styles.inactive}`}>
-            {status.twitter_api_ok ? 'CONNECTED' : 'DISCONNECTED'}
+          <div className={`${styles.value} ${twitterStatusInfo.className}`}>
+            {twitterStatusInfo.text}
           </div>
         </div>
 
         <div className={styles.item}>
           <div className={styles.label}>Telegram Bot</div>
-          <div className={`${styles.value} ${status.telegram_bot_ok ? styles.active : styles.inactive}`}>
-            {status.telegram_bot_ok ? 'CONNECTED' : 'DISCONNECTED'}
+          <div className={`${styles.value} ${telegramStatusInfo.className}`}>
+            {telegramStatusInfo.text}
           </div>
         </div>
 
@@ -48,14 +76,14 @@ export default function StatusCard({ status }) {
         <div className={styles.item}>
           <div className={styles.label}>Monitoring</div>
           <div className={styles.value}>
-            {status.monitoring.usernames_count} usernames
+            {status.monitoring?.usernames_count ?? 'N/A'} usernames
           </div>
         </div>
 
         <div className={styles.item}>
           <div className={styles.label}>Check Interval</div>
           <div className={styles.value}>
-            {status.monitoring.check_interval_minutes} minutes
+            {status.monitoring?.check_interval_minutes ?? 'N/A'} minutes
           </div>
         </div>
 

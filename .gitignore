@@ -44,4 +44,7 @@ settings.json
 # Testing
 .pytest_cache/
 .coverage
-htmlcov/ 
+htmlcov/
+
+# Node.js dependencies
+node_modules/ 

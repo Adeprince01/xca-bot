@@ -89,6 +89,15 @@ npm install
 
 The frontend automatically connects to the backend API at `http://localhost:8000/api/v1`. To change this, set the `NEXT_PUBLIC_API_BASE_URL` environment variable or edit the configuration in `app/lib/api.js`.
 
+### Frontend Frameworks Used
+
+- **Next.js**: React-based framework for server-side rendering and static site generation.
+- **Tailwind CSS**: Utility-first CSS framework for rapid UI development.
+
+You can find more about these frameworks here:
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
+
 ## Configuration
 
 XCA-Bot can be configured using either:
@@ -203,61 +212,32 @@ xca-bot/
 ├── requirements.txt         # Dependencies
 ├── app/                     # Web dashboard (Next.js)
 │   ├── components/          # React components
-│   ├── lib/                 # API client and utilities
-│   ├── pages/               # Next.js pages
-│   ├── public/              # Static assets
-│   ├── styles/              # CSS styles
-│   └── package.json         # Frontend dependencies
-├── src/
-│   ├── api/                 # API components
-│   │   ├── app.py           # FastAPI application
-│   │   └── routes.py        # API routes
-│   ├── core/                # Core components
-│   │   ├── logger.py        # Logging utilities
-│   │   └── monitor.py       # Main monitor service
-│   ├── models/              # Data models
-│   │   ├── config.py        # Configuration models
-│   │   └── match.py         # Match data models
-│   ├── db/                  # Data access
-│   │   ├── models.py        # Database models
-│   │   └── repository.py    # Database access
-│   └── services/            # Service components
-│       ├── telegram_service.py  # Telegram functionality
-│       └── twitter_service.py   # Twitter functionality
-└── logs/                    # Log files
+│   │   ├── lib/                 # API client and utilities
+│   │   ├── pages/               # Next.js pages
+│   │   ├── public/              # Static assets
+│   │   ├── styles/              # CSS styles
+│   │   └── package.json         # Frontend dependencies
+│   ├── src/
+│   │   ├── api/                 # API components
+│   │   │   ├── app.py           # FastAPI application
+│   │   │   └── routes.py        # API routes
+│   │   ├── core/                # Core components
+│   │   │   ├── logger.py        # Logging utilities
+│   │   │   └── monitor.py       # Main monitor service
+│   │   ├── models/              # Data models
+│   │   │   ├── config.py        # Configuration models
+│   │   │   └── match.py         # Match data models
+│   │   ├── db/                  # Data access
+│   │   │   ├── models.py        # Database models
+│   │   │   └── repository.py    # Database access
+│   │   └── services/            # Service components
+│   │       ├── telegram_service.py  # Telegram functionality
+│   │       └── twitter_service.py   # Twitter functionality
+│   └── logs/                    # Log files
 ```
 
 ## Troubleshooting
 
 ### Backend Issues
 
-- Check the log files in the `logs/` directory
-- Ensure your Twitter API credentials are valid
-- Verify your Telegram bot has permission to send messages
-- Check that your `.env` file contains the correct values
-
-### Frontend Issues
-
-- Check browser console for errors
-- Ensure the backend API is running
-- Verify the API URL is set correctly
-- Try clearing browser cache
-
-### Common Solutions
-
-- **API Connection Failures**: Make sure the backend is running and the API URL is correct
-- **Twitter API Errors**: Verify your Twitter credentials and permissions
-- **Telegram Errors**: Ensure your bot token is valid and the bot has admin permissions in the channel
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgements
-
-- [Tweepy](https://www.tweepy.org/) for Twitter API access
-- [python-telegram-bot](https://python-telegram-bot.org/) for Telegram interactions
-- [FastAPI](https://fastapi.tiangolo.com/) for the API framework
-- [Next.js](https://nextjs.org/) for the web dashboard
-- [React](https://reactjs.org/) for the frontend user interface
-- [SQLAlchemy](https://www.sqlalchemy.org/) for database ORM 
+- Check the log files in the `

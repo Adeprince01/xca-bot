@@ -86,7 +86,7 @@ class MonitoringConfig(BaseModel):
     check_interval_minutes: int = Field(15, description="Check interval in minutes", ge=1)
     usernames: List[str] = Field(default_factory=list, description="Twitter usernames to monitor")
     regex_patterns: List[str] = Field(
-        default_factory=lambda: ["0x[a-fA-F0-9]{40}"],
+        default_factory=lambda: ["0x[a-fA-F0-9]{40}", "$[A-Za-z][A-Za-z0-9]+"],
         description="Regex patterns to match in tweets"
     )
     keywords: List[str] = Field(
